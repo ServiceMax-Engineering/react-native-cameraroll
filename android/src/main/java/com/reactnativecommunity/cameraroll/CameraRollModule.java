@@ -7,6 +7,8 @@
 
 package com.reactnativecommunity.cameraroll;
 
+import android.os.Bundle;
+import android.os.Build;
 import android.content.ContentResolver;
 import android.content.ContentUris;
 import android.content.Context;
@@ -378,19 +380,36 @@ public class CameraRollModule extends ReactContextBaseJavaModule {
       ContentResolver resolver = mContext.getContentResolver();
 
       try {
-        // set LIMIT to first + 1 so that we know how to populate page_info
-        String limit = "limit=" + (mFirst + 1);
-
-        if (!TextUtils.isEmpty(mAfter)) {
-          limit = "limit=" + mAfter + "," + (mFirst + 1);
+        Cursor media;
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+          Bundle bundle = new Bundle();
+          bundle.putString(ContentResolver.QUERY_ARG_SQL_SELECTION, selection.toString());
+          bundle.putStringArray(ContentResolver.QUERY_ARG_SQL_SELECTION_ARGS,
+                  selectionArgs.toArray(new String[selectionArgs.size()]));
+          bundle.putString(ContentResolver.QUERY_ARG_SQL_SORT_ORDER, Images.Media.DATE_ADDED + " DESC, " + Images.Media.DATE_MODIFIED + " DESC");
+          bundle.putInt(ContentResolver.QUERY_ARG_LIMIT, mFirst + 1);
+          if (!TextUtils.isEmpty(mAfter)) {
+            bundle.putInt(ContentResolver.QUERY_ARG_OFFSET, Integer.parseInt(mAfter));
+          }
+          media = resolver.query(
+                  MediaStore.Files.getContentUri("external"),
+                  PROJECTION,
+                  bundle,
+                  null);
+        } else {
+          // set LIMIT to first + 1 so that we know how to populate page_info
+          String limit = "limit=" + (mFirst + 1);
+          if (!TextUtils.isEmpty(mAfter)) {
+            limit = "limit=" + mAfter + "," + (mFirst + 1);
+          }
+          media = resolver.query(
+                  MediaStore.Files.getContentUri("external").buildUpon().encodedQuery(limit).build(),
+                  PROJECTION,
+                  selection.toString(),
+                  selectionArgs.toArray(new String[selectionArgs.size()]),
+                  Images.Media.DATE_ADDED + " DESC, " + Images.Media.DATE_MODIFIED + " DESC");
         }
 
-        Cursor media = resolver.query(
-            MediaStore.Files.getContentUri("external").buildUpon().encodedQuery(limit).build(),
-            PROJECTION,
-            selection.toString(),
-            selectionArgs.toArray(new String[selectionArgs.size()]),
-            Images.Media.DATE_ADDED + " DESC, " + Images.Media.DATE_MODIFIED + " DESC");
         if (media == null) {
           mPromise.reject(ERROR_UNABLE_TO_LOAD, "Could not get media");
         } else {
@@ -576,7 +595,9 @@ public class CameraRollModule extends ReactContextBaseJavaModule {
       boolean includeImageSize,
       boolean includePlayableDuration) {
     WritableMap image = new WritableNativeMap();
-    Uri photoUri = Uri.parse("file://" + media.getString(dataIndex));
+    // Uri photoUri = Uri.parse("file://" + media.getString(dataIndex));
+    Uri externalUri = MediaStore.Files.getContentUri("external");
+    Uri photoUri = ContentUris.withAppendedId(externalUri, media.getLong(media.getColumnIndexOrThrow(Images.Media._ID)));
     image.putString("uri", photoUri.toString());
     String mimeType = media.getString(mimeTypeIndex);
 
@@ -649,7 +670,11 @@ public class CameraRollModule extends ReactContextBaseJavaModule {
                 + photoUri.toString(),
             e);
       }
-      retriever.release();
+      try {
+        retriever.release();
+      } catch (IOException e) {
+        // Do nothing. We can't handle this, and this is usually a system problem
+      }
     }
 
     if (photoDescriptor != null) {
@@ -719,7 +744,11 @@ public class CameraRollModule extends ReactContextBaseJavaModule {
                     + photoUri.toString(),
                 e);
           }
-          retriever.release();
+          try {
+            retriever.release();
+          } catch (IOException e) {
+            // Do nothing. We can't handle this, and this is usually a system problem
+          }
         } else {
           BitmapFactory.Options options = new BitmapFactory.Options();
           // Set inJustDecodeBounds to true so we don't actually load the Bitmap, but only get its
